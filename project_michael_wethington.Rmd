@@ -1,0 +1,396 @@
+---
+title: "Bayesian_Seals_Project"
+author: "Michael Wethington"
+date: "10/26/2020"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+**Load Packages**
+```{r Package setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, tidy = TRUE, messages = FALSE)
+
+library(MCMCvis)
+library(R2jags)
+library(abind)
+library(boot)
+library(tidyr)
+library(ggplot2)
+library(reshape2)
+library(Rlab)
+
+
+jags.directory = "C:/Program Files/JAGS"
+setwd("C:/Users/wmichael/Google Drive/BEE569/project/Rproject")
+
+```
+
+
+
+**Load the seal data**
+```{r Data Setup}
+knitr::opts_chunk$set(tidy = TRUE, message = FALSE)
+
+
+#load csv 
+seals <- read.csv(file = "C:/Users/wmichael/Google Drive/BEE569/project/raw_data/model2/mod2_floes_join_seals.csv", header = TRUE)
+
+#take only the first 4 columns of the dataset
+seals <- seals[,1:4] 
+
+#rename seal count on each ice floe
+names(seals)[names(seals)== "Join_Count"] <- "density" 
+
+#Standardize Area (mean = 0, sd = 1)
+seals$area <- (seals$area - mean(seals$area))/sd(seals$area)
+
+#Add a binary for presence absence of seals on each ice floe
+seals$presence <- as.integer(seals$density > 0)
+
+#Extact all OCCUPIED locations (indicated by value of 1)
+occupied.floes <- subset(seals, seals$presence > 0)
+
+#Extract all ice floes NOT OCCUPIED
+empty.floes <- subset(seals, seals$presence == 0 )
+
+#Pull a random sample that is the SAME SIZE as the the occupied seals
+empty.floes.samples <- empty.floes[sample(nrow(empty.floes),length(occupied.floes[,1])),]
+
+#bind the samples together
+seals.subset <- rbind(occupied.floes, empty.floes.samples)
+
+#subet the data further if needed
+# seals.subset <- seals.subset[sample(nrow(seals.subset),500),]
+
+
+#variables for graphics
+area <- seals$area 
+density <- seals$density
+n <- length(area)
+
+
+
+
+```
+
+*Exploratory Analysis*
+
+
+```{r Exploratory Analysis}
+knitr::opts_chunk$set(tidy = TRUE, message = FALSE)
+
+#run a poisson glm with all Model.1 data to establish a frequentist picture
+options(scipen=99)
+glm1 <- glm(density~area , data = seals, family="poisson" (link = "log"))
+summary(glm1)
+
+
+# 
+# dplyr to identify counts of densities and their relative proportions in the training dataset
+# seals %>%
+#   group_by(seals$density) %>%
+#   summarise(Count = n()) %>%
+#   mutate(freq = Count / sum(n))
+
+
+#plot density ~ area (full range)
+ggplot(data = seals,
+       mapping = aes(x = area, y = density))+
+  geom_point(alpha = 0.5, aes(color = 2))+
+  theme_get()+
+  ylim(0,25)+
+  labs(x = expression(paste("Ice Floe Area ", m^2)), y = expression(paste("Seal Density")))
+
+# 
+# #plot density ~ area (with limits)
+# ggplot(data = seals, 
+#        mapping = aes(x = area, y = density))+
+#   geom_point(alpha = 0.5, aes(color = 2))+
+#   theme_get()+
+#   ylim(0,25)+
+#   xlim(0,10000)+
+#   labs(x = expression(paste("Ice Floe Area ", m^2)), y = expression(paste("Seal Density")))
+# 
+
+
+
+# plot density histogram
+ggplot(data = seals, 
+       mapping = aes(x = density))+
+  geom_histogram(bins = 25, alpha = 0.5, color = "black", fill= "blue")+
+  theme_get()+
+  ylim(0, 250)+
+  labs(x = expression(paste("Seal Density")), y = expression(paste("Count")))
+
+
+```
+
+
+
+$$Abundance_i \backsim P(\lambda) \ \ (Response \ Distribution) \\
+log(\lambda_i) = n_i \ \ (link \ function) \\
+n_i = \beta_o + \beta_1Area_i \ \ (linear \ predictor) \\
+\beta_0,\beta_1 \backsim N(0, 0.00001) \ \ (uninformative \ prior)$$
+
+
+
+
+```{r Run Model 2 (Real Data)}
+knitr::opts_chunk$set(cache = TRUE, message = FALSE, eval = FALSE)
+
+
+
+JAGSfile <- "Mod2.Seals_Abundance.jags"
+cat("
+  model {
+
+  # uninformative priors
+  alpha.lam ~ dnorm(0, 1/2.71)
+  beta1.lam ~ dnorm(0, 1/2.71)
+  alpha.occ ~ dbeta(1, 1)
+  # beta1.occ ~ dnorm(0, 1/2.71)
+  
+
+  #likelihood
+  
+  #Biological model for abundance
+  for (i in 1:N.patches) #move through all ice floes
+    {
+    
+    Count[i] ~ dpois(lambda[i] * w[i] + 0.001) #seal density follows a poisson w  - 0/1
+    logit(lambda[i]) <- alpha.lam + beta1.lam * Area.lam[i] #abundance models as a function of floe size
+    
+    
+    w[i] ~ dbern(p[i]) #occupancy of ith ice floe (w = 1 if occupied)
+    p[i] <- alpha.occ  #probability of occupancy 
+    }
+  
+    }",fill = TRUE, file= JAGSfile)
+
+
+
+#Data as list for JAGS
+Dat <- list(
+  N.patches = nrow(seals.subset),
+  Count = as.numeric(seals.subset$density),
+  w = ifelse(seals.subset$presence > 0, 1, NA),
+  Area.lam = as.numeric(seals.subset$area))#,
+  # Area.occ = as.numeric(seals.subset$area))
+
+#Function for initial parameter values
+# inits = list(list(alpha.lam = runif(1, -5, 5),  beta1.lam = runif(1, -5, 5), alpha.occ = runif(1, -5, 5),  beta1.occ = runif(1, -5, 5)),
+#              list(alpha.lam = runif(1, 0, 10),  beta1.lam = runif(1, 0, 10), alpha.occ = runif(1, 0, 10),  beta1.occ = runif(1, 0, 10)),
+#              list(alpha.lam = runif(1, -10, 0),  beta1.lam = runif(1, -10, 0), alpha.occ = runif(1, -10, 0),  beta1.occ = runif(1, -10, 0)))
+
+# # Function for initial parameter values
+inits = list(list(alpha.lam = runif(1, -5, 5),  beta1.lam = runif(1, -5, 5), alpha.occ = rbeta(1, 0, 1) ),
+             list(alpha.lam = runif(1, 0, 10),  beta1.lam = runif(1, 0, 10), alpha.occ = rbeta(1, 0, 1) ),
+             list(alpha.lam = runif(1, -10, 0),  beta1.lam = runif(1, -10, 0), alpha.occ = rbeta(1, 0, 1) ))
+
+#Parameters we want to track
+ParsStage <- c("alpha.lam","beta1.lam", 
+               "alpha.occ")
+# 
+# #Parameters we want to track
+# ParsStage <- c("alpha.lam","beta1.lam", 
+#                "alpha.occ", "beta1.occ", "w")
+
+
+#Variables for MCMC
+ni <- 12000  # number of draws from the posterior
+nt <- 1    #thinning rate
+nb <- 2000  # number to discard for burn-in
+nc <- 3  # number of chains
+
+
+
+#JAGS model
+Mod2 = jags(inits=inits,
+            n.chains=nc,
+            model.file="Mod2.Seals_Abundance.jags",
+            working.directory=getwd(),
+            data=Dat,
+            parameters.to.save=ParsStage,
+            n.thin=nt,
+            n.iter=ni,
+            n.burnin=nb,
+            DIC=T)
+
+
+#save(Mod2 , file="Mod2_RealData.RData")
+#load("Mod2_RealData.RData")
+
+
+```
+
+
+**Plot Model 2 Data**
+
+```{r Plot Model 2 Data}
+
+load("Mod2_RealData.RData")
+
+#Summarize the model (we want Rhat to be as close as possible to 1)
+MCMCsummary(Mod2, round = 2) 
+
+#Summarize Alpha
+MCMCsummary(Mod2, 
+            params = 'alpha.lam')
+
+#Summarize Beta
+MCMCsummary(Mod2, 
+            params = 'beta1.lam')
+
+#Summarize Beta
+MCMCsummary(Mod2, 
+            params = 'alpha.occ')
+
+
+#Check posteriors for convergence
+MCMCtrace(Mod2, params = c('alpha.lam', 'beta1.lam', 'alpha.occ'), ISB = FALSE, pdf = FALSE )
+
+```
+
+**Simulate Model 2 - V1**
+
+
+
+
+```{r Simulate Model 2 (v1)}
+knitr::opts_chunk$set(cache = TRUE, message = FALSE, eval = FALSE)
+
+
+#Simulate the data 
+
+#regression coefficients (we pick these values)
+alpha.lam.sim <- .5       
+beta1.lam.sim <- .05
+alpha1.occ.sim <- .5
+
+area.sim <- seals.subset$area #use real floe size data to calculate, the lambda for that floe, then using a poisson draw to simulate the number of seals 
+
+#compute mu's
+mu <- exp(alpha.lam.sim + beta1.lam.sim * area.sim)
+
+#generate Y-values
+counts.sim <- rpois(n=length(seals.subset$density), lambda=(mu))
+
+#compute p.i
+p.sims <- alpha1.occ.sim
+w.sims <- rbern(n=length(seals.subset$density), prob = p.sims)
+
+
+JAGSfile <- "Mod2_Simulation.jags"
+cat("
+  model {
+
+  # uninformative priors
+  alpha.lam ~ dnorm(0, 1/2.71)
+  beta1.lam ~ dnorm(0, 1/2.71)
+  alpha.occ ~ dbeta(1, 1)
+  # beta1.occ ~ dnorm(0, 1/2.71)
+  
+
+  #likelihood
+  
+  #Biological model for abundance
+  for (i in 1:N.patches) #move through all ice floes
+    {
+    
+    Count[i] ~ dpois(lambda[i] * w[i] + 0.001) #seal density follows a poisson w  - 0/1
+    logit(lambda[i]) <- alpha.lam + beta1.lam * Area.lam[i] #abundance models as a function of floe size
+    
+    
+    w[i] ~ dbern(p[i]) #occupancy of ith ice floe (w = 1 if occupied)
+    p[i] <- alpha.occ  #probability of occupancy 
+    }
+  
+
+    }",fill = TRUE, file= JAGSfile)
+
+
+
+#Data as list for JAGS
+Dat <- list(
+  N.patches = nrow(seals.subset),
+  Count = as.numeric(counts.sim),
+  w = ifelse(w.sims > 0, 1, NA),
+  Area.lam = as.numeric(seals.subset$area))#,
+  # Area.occ = as.numeric(seals.subset$area))
+
+#Function for initial parameter values
+# inits = list(list(alpha.lam = runif(1, -5, 5),  beta1.lam = runif(1, -5, 5), alpha.occ = runif(1, -5, 5),  beta1.occ = runif(1, -5, 5)),
+#              list(alpha.lam = runif(1, 0, 10),  beta1.lam = runif(1, 0, 10), alpha.occ = runif(1, 0, 10),  beta1.occ = runif(1, 0, 10)),
+#              list(alpha.lam = runif(1, -10, 0),  beta1.lam = runif(1, -10, 0), alpha.occ = runif(1, -10, 0),  beta1.occ = runif(1, -10, 0)))
+
+# # Function for initial parameter values
+inits = list(list(alpha.lam = runif(1, -5, 5),  beta1.lam = runif(1, -5, 5), alpha.occ = rbeta(1, 0, 1) ),
+             list(alpha.lam = runif(1, 0, 10),  beta1.lam = runif(1, 0, 10), alpha.occ = rbeta(1, 0, 1) ),
+             list(alpha.lam = runif(1, -10, 0),  beta1.lam = runif(1, -10, 0), alpha.occ = rbeta(1, 0, 1) ))
+
+
+#Parameters we want to track
+ParsStage <- c("alpha.lam","beta1.lam", 
+               "alpha.occ")
+# 
+# #Parameters we want to track
+# ParsStage <- c("alpha.lam","beta1.lam", 
+#                "alpha.occ", "beta1.occ", "w")
+
+
+#Variables for MCMC
+ni <- 12000  # number of draws from the posterior
+nt <- 1    #thinning rate
+nb <- 2000  # number to discard for burn-in
+nc <- 3  # number of chains
+
+
+
+#JAGS model
+Mod2.sim = jags(inits=inits,
+            n.chains=nc,
+            model.file="Mod2_Simulation.jags",
+            working.directory=getwd(),
+            data=Dat,
+            parameters.to.save=ParsStage,
+            n.thin=nt,
+            n.iter=ni,
+            n.burnin=nb,
+            DIC=T)
+
+#save(Mod2.sim , file="Mod2_Simulation1.RData")
+#load("Mod2_Simulation1.RData")
+
+
+```
+
+
+```{r}
+load("Mod2_Simulation1.RData")
+
+#Summarize the model (we want Rhat to be as close as possible to 1)
+MCMCsummary(Mod2.sim, round = 2) 
+
+#Summarize Alpha
+MCMCsummary(Mod2.sim, 
+            params = 'alpha.lam')
+
+#Summarize Beta
+MCMCsummary(Mod2.sim, 
+            params = 'beta1.lam')
+
+#Summarize Beta
+MCMCsummary(Mod2.sim, 
+            params = 'alpha.occ')
+
+
+#Check posteriors for convergence
+MCMCtrace(Mod2, params = c('alpha.lam', 'beta1.lam', 'alpha.occ'), ISB = FALSE, pdf = FALSE )
+
+```
+
+
+
+
+
