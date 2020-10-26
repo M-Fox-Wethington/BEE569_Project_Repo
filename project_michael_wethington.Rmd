@@ -11,6 +11,7 @@ output:
 ```{r Package setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, tidy = TRUE, messages = FALSE)
 
+
 library(MCMCvis)
 library(R2jags)
 library(abind)
@@ -22,7 +23,7 @@ library(Rlab)
 
 
 jags.directory = "C:/Program Files/JAGS"
-setwd("C:/Users/wmichael/Google Drive/BEE569/project/Rproject")
+# setwd("C:/Users/wmichael/Google Drive/BEE569/project/Rproject")
 
 ```
 
@@ -40,13 +41,13 @@ seals <- read.csv(file = "C:/Users/wmichael/Google Drive/BEE569/project/raw_data
 seals <- seals[,1:4] 
 
 #rename seal count on each ice floe
-names(seals)[names(seals)== "Join_Count"] <- "density" 
+names(seals)[names(seals)== "Join_Count"] <- "Count" 
 
 #Standardize Area (mean = 0, sd = 1)
 seals$area <- (seals$area - mean(seals$area))/sd(seals$area)
 
 #Add a binary for presence absence of seals on each ice floe
-seals$presence <- as.integer(seals$density > 0)
+seals$presence <- as.integer(seals$Count > 0)
 
 #Extact all OCCUPIED locations (indicated by value of 1)
 occupied.floes <- subset(seals, seals$presence > 0)
@@ -64,9 +65,9 @@ seals.subset <- rbind(occupied.floes, empty.floes.samples)
 # seals.subset <- seals.subset[sample(nrow(seals.subset),500),]
 
 
-#variables for graphics
+#variables for plotting graphics
 area <- seals$area 
-density <- seals$density
+Count <- seals$Count
 n <- length(area)
 
 
@@ -74,54 +75,56 @@ n <- length(area)
 
 ```
 
-*Exploratory Analysis*
+**Exploratory Analysis**
 
+#intercept (alpha) the predicted value of the response variable (Count) when the Covariate (Floe Area) is zero 
 
 ```{r Exploratory Analysis}
 knitr::opts_chunk$set(tidy = TRUE, message = FALSE)
 
 #run a poisson glm with all Model.1 data to establish a frequentist picture
 options(scipen=99)
-glm1 <- glm(density~area , data = seals, family="poisson" (link = "log"))
+glm1 <- glm(Count~area , data = seals, family="poisson" (link = "log"))
 summary(glm1)
+
 
 
 # 
 # dplyr to identify counts of densities and their relative proportions in the training dataset
 # seals %>%
-#   group_by(seals$density) %>%
+#   group_by(seals$Count) %>%
 #   summarise(Count = n()) %>%
 #   mutate(freq = Count / sum(n))
 
 
-#plot density ~ area (full range)
+#plot Count ~ area (full range)
 ggplot(data = seals,
-       mapping = aes(x = area, y = density))+
+       mapping = aes(x = area, y = Count))+
   geom_point(alpha = 0.5, aes(color = 2))+
   theme_get()+
   ylim(0,25)+
-  labs(x = expression(paste("Ice Floe Area ", m^2)), y = expression(paste("Seal Density")))
+  labs(x = expression(paste("Ice Floe Area ", m^2)), y = expression(paste("Seal Count")))
 
 # 
-# #plot density ~ area (with limits)
+# #plot Count ~ area (with limits)
 # ggplot(data = seals, 
-#        mapping = aes(x = area, y = density))+
+#        mapping = aes(x = area, y = Count))+
 #   geom_point(alpha = 0.5, aes(color = 2))+
 #   theme_get()+
 #   ylim(0,25)+
 #   xlim(0,10000)+
-#   labs(x = expression(paste("Ice Floe Area ", m^2)), y = expression(paste("Seal Density")))
+#   labs(x = expression(paste("Ice Floe Area ", m^2)), y = expression(paste("Seal Count")))
 # 
 
 
 
-# plot density histogram
+# plot Count histogram
 ggplot(data = seals, 
-       mapping = aes(x = density))+
+       mapping = aes(x = Count))+
   geom_histogram(bins = 25, alpha = 0.5, color = "black", fill= "blue")+
   theme_get()+
   ylim(0, 250)+
-  labs(x = expression(paste("Seal Density")), y = expression(paste("Count")))
+  labs(x = expression(paste("Seal Count")), y = expression(paste("Count")))
 
 
 ```
@@ -158,7 +161,7 @@ cat("
   for (i in 1:N.patches) #move through all ice floes
     {
     
-    Count[i] ~ dpois(lambda[i] * w[i] + 0.001) #seal density follows a poisson w  - 0/1
+    Count[i] ~ dpois(lambda[i] * w[i] + 0.001) #seal Count follows a poisson w  - 0/1
     logit(lambda[i]) <- alpha.lam + beta1.lam * Area.lam[i] #abundance models as a function of floe size
     
     
@@ -173,7 +176,7 @@ cat("
 #Data as list for JAGS
 Dat <- list(
   N.patches = nrow(seals.subset),
-  Count = as.numeric(seals.subset$density),
+  Count = as.numeric(seals.subset$Count),
   w = ifelse(seals.subset$presence > 0, 1, NA),
   Area.lam = as.numeric(seals.subset$area))#,
   # Area.occ = as.numeric(seals.subset$area))
@@ -218,7 +221,7 @@ Mod2 = jags(inits=inits,
             DIC=T)
 
 
-#save(Mod2 , file="Mod2_RealData.RData")
+save(Mod2 , file="Mod2_RealData.RData")
 #load("Mod2_RealData.RData")
 
 
@@ -274,11 +277,11 @@ area.sim <- seals.subset$area #use real floe size data to calculate, the lambda 
 mu <- exp(alpha.lam.sim + beta1.lam.sim * area.sim)
 
 #generate Y-values
-counts.sim <- rpois(n=length(seals.subset$density), lambda=(mu))
+counts.sim <- rpois(n=length(seals.subset$Count), lambda=(mu))
 
 #compute p.i
 p.sims <- alpha1.occ.sim
-w.sims <- rbern(n=length(seals.subset$density), prob = p.sims)
+w.sims <- rbern(n=length(seals.subset$Count), prob = p.sims)
 
 
 JAGSfile <- "Mod2_Simulation.jags"
@@ -298,7 +301,7 @@ cat("
   for (i in 1:N.patches) #move through all ice floes
     {
     
-    Count[i] ~ dpois(lambda[i] * w[i] + 0.001) #seal density follows a poisson w  - 0/1
+    Count[i] ~ dpois(lambda[i] * w[i] + 0.001) #seal Count follows a poisson w  - 0/1
     logit(lambda[i]) <- alpha.lam + beta1.lam * Area.lam[i] #abundance models as a function of floe size
     
     
@@ -359,7 +362,7 @@ Mod2.sim = jags(inits=inits,
             n.burnin=nb,
             DIC=T)
 
-#save(Mod2.sim , file="Mod2_Simulation1.RData")
+save(Mod2.sim , file="Mod2_Simulation1.RData")
 #load("Mod2_Simulation1.RData")
 
 
