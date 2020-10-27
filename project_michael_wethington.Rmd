@@ -20,6 +20,11 @@ library(tidyr)
 library(ggplot2)
 library(reshape2)
 library(Rlab)
+library(ggpubr)
+library(colorspace)
+library(wesanderson)
+library(ggrepel)
+library(patchwork)
 
 
 jags.directory = "C:/Program Files/JAGS"
@@ -84,10 +89,13 @@ knitr::opts_chunk$set(tidy = TRUE, message = FALSE)
 
 #run a poisson glm with all Model.1 data to establish a frequentist picture
 options(scipen=99)
-glm1 <- glm(Count~area , data = seals, family="poisson" (link = "log"))
+fit <- glm(Count~area , data = seals, family="poisson" (link = "log"))
 summary(glm1)
+summary(fit)
 
 
+plot(Count~area, data = seals)
+abline(fit, col = 'red')
 
 # 
 # dplyr to identify counts of densities and their relative proportions in the training dataset
@@ -105,16 +113,19 @@ ggplot(data = seals,
   ylim(0,25)+
   labs(x = expression(paste("Ice Floe Area ", m^2)), y = expression(paste("Seal Count")))
 
-# 
-# #plot Count ~ area (with limits)
-# ggplot(data = seals, 
-#        mapping = aes(x = area, y = Count))+
-#   geom_point(alpha = 0.5, aes(color = 2))+
-#   theme_get()+
-#   ylim(0,25)+
-#   xlim(0,10000)+
-#   labs(x = expression(paste("Ice Floe Area ", m^2)), y = expression(paste("Seal Count")))
-# 
+
+
+
+
+#plot Count ~ area (with limits)
+ggplot(data = seals,
+       mapping = aes(x = area, y = Count))+
+  geom_point(alpha = 0.5, aes(color = 2))+
+  theme_get()+
+  ylim(0,25)+
+  xlim(0,200)+
+  labs(x = expression(paste("Ice Floe Area ", m^2)), y = expression(paste("Seal Count")))
+
 
 
 
@@ -259,7 +270,6 @@ MCMCtrace(Mod2, params = c('alpha.lam', 'beta1.lam', 'alpha.occ'), ISB = FALSE, 
 
 
 
-
 ```{r Simulate Model 2 (v1)}
 knitr::opts_chunk$set(cache = TRUE, message = FALSE, eval = FALSE)
 
@@ -362,7 +372,7 @@ Mod2.sim = jags(inits=inits,
             n.burnin=nb,
             DIC=T)
 
-save(Mod2.sim , file="Mod2_Simulation1.RData")
+#save(Mod2.sim , file="Mod2_Simulation1.RData")
 #load("Mod2_Simulation1.RData")
 
 
