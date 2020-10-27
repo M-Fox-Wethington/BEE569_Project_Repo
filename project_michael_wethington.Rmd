@@ -155,15 +155,18 @@ knitr::opts_chunk$set(cache = TRUE, message = FALSE, eval = FALSE)
 
 
 
-JAGSfile <- "Mod2.Seals_Abundance.jags"
+JAGSfile <- "Model2_Duo.jags"
 cat("
   model {
 
-  # uninformative priors
+  #Count priors
   alpha.lam ~ dnorm(0, 1/2.71)
   beta1.lam ~ dnorm(0, 1/2.71)
-  alpha.occ ~ dbeta(1, 1)
-  # beta1.occ ~ dnorm(0, 1/2.71)
+  
+  #Occupancy priors
+  alpha.occ <-  logit(p0)
+  p0 ~ dbeta(1, 1)
+  beta1.occ ~ dunif(-5, 5)
   
 
   #likelihood
@@ -172,14 +175,14 @@ cat("
   for (i in 1:N.patches) #move through all ice floes
     {
     
-    Count[i] ~ dpois(lambda[i] * w[i] + 0.001) #seal Count follows a poisson w  - 0/1
+    Count[i] ~ dpois(lambda[i] * w[i] + 0.001) #seal density follows a poisson w  - 0/1
     logit(lambda[i]) <- alpha.lam + beta1.lam * Area.lam[i] #abundance models as a function of floe size
     
-    
     w[i] ~ dbern(p[i]) #occupancy of ith ice floe (w = 1 if occupied)
-    p[i] <- alpha.occ  #probability of occupancy 
+    logit(p[i]) <- alpha.occ + beta1.occ * Area.occ[i]  #probability of occupancy 
     }
   
+
     }",fill = TRUE, file= JAGSfile)
 
 
@@ -189,50 +192,42 @@ Dat <- list(
   N.patches = nrow(seals.subset),
   Count = as.numeric(seals.subset$Count),
   w = ifelse(seals.subset$presence > 0, 1, NA),
-  Area.lam = as.numeric(seals.subset$area))#,
-  # Area.occ = as.numeric(seals.subset$area))
+  Area.lam = as.numeric(seals.subset$area),
+  Area.occ = as.numeric(seals.subset$area))
 
-#Function for initial parameter values
-# inits = list(list(alpha.lam = runif(1, -5, 5),  beta1.lam = runif(1, -5, 5), alpha.occ = runif(1, -5, 5),  beta1.occ = runif(1, -5, 5)),
-#              list(alpha.lam = runif(1, 0, 10),  beta1.lam = runif(1, 0, 10), alpha.occ = runif(1, 0, 10),  beta1.occ = runif(1, 0, 10)),
-#              list(alpha.lam = runif(1, -10, 0),  beta1.lam = runif(1, -10, 0), alpha.occ = runif(1, -10, 0),  beta1.occ = runif(1, -10, 0)))
 
-# # Function for initial parameter values
-inits = list(list(alpha.lam = runif(1, -5, 5),  beta1.lam = runif(1, -5, 5), alpha.occ = rbeta(1, 0, 1) ),
-             list(alpha.lam = runif(1, 0, 10),  beta1.lam = runif(1, 0, 10), alpha.occ = rbeta(1, 0, 1) ),
-             list(alpha.lam = runif(1, -10, 0),  beta1.lam = runif(1, -10, 0), alpha.occ = rbeta(1, 0, 1) ))
+# # # Function for initial parameter values
+# inits = list(list(alpha.lam = runif(1, -5, 5),  beta1.lam = runif(1, -5, 5), p0 = rbeta(1, 0, 1) ),
+#              list(alpha.lam = runif(1, 0, 10),  beta1.lam = runif(1, 0, 10), p0 = rbeta(1, 0, 1) ),
+#              list(alpha.lam = runif(1, -10, 0),  beta1.lam = runif(1, -10, 0), p0 = rbeta(1, 0, 1)))
 
 #Parameters we want to track
 ParsStage <- c("alpha.lam","beta1.lam", 
-               "alpha.occ")
-# 
-# #Parameters we want to track
-# ParsStage <- c("alpha.lam","beta1.lam", 
-#                "alpha.occ", "beta1.occ", "w")
+               "alpha.occ", "beta1.occ")
 
 
 #Variables for MCMC
-ni <- 12000  # number of draws from the posterior
-nt <- 1    #thinning rate
-nb <- 2000  # number to discard for burn-in
+ni <- 52500  # number of draws from the posterior
+nt <- 5   #thinning rate
+nb <- 2500  # number to discard for burn-in
 nc <- 3  # number of chains
 
 
 
 #JAGS model
-Mod2 = jags(inits=inits,
-            n.chains=nc,
-            model.file="Mod2.Seals_Abundance.jags",
-            working.directory=getwd(),
-            data=Dat,
-            parameters.to.save=ParsStage,
-            n.thin=nt,
-            n.iter=ni,
-            n.burnin=nb,
-            DIC=T)
+Mod2_duo = jags(
+                n.chains=nc,
+                model.file="Model2_Duo.jags",
+                working.directory=getwd(),
+                data=Dat,
+                parameters.to.save=ParsStage,
+                n.thin=nt,
+                n.iter=ni,
+                n.burnin=nb,
+                DIC=T)
 
 
-save(Mod2 , file="Mod2_RealData.RData")
+save(Mod2_duo , file="Mod2_RealData_duo.RData")
 #load("Mod2_RealData.RData")
 
 
@@ -246,23 +241,23 @@ save(Mod2 , file="Mod2_RealData.RData")
 load("Mod2_RealData.RData")
 
 #Summarize the model (we want Rhat to be as close as possible to 1)
-MCMCsummary(Mod2, round = 2) 
+MCMCsummary(Mod2_duo, round = 2) 
 
 #Summarize Alpha
-MCMCsummary(Mod2, 
+MCMCsummary(Mod2_duo, 
             params = 'alpha.lam')
 
 #Summarize Beta
-MCMCsummary(Mod2, 
+MCMCsummary(Mod2_duo, 
             params = 'beta1.lam')
 
 #Summarize Beta
-MCMCsummary(Mod2, 
+MCMCsummary(Mod2_duo, 
             params = 'alpha.occ')
 
 
 #Check posteriors for convergence
-MCMCtrace(Mod2, params = c('alpha.lam', 'beta1.lam', 'alpha.occ'), ISB = FALSE, pdf = FALSE )
+MCMCtrace(Mod2_duo, ISB = FALSE, pdf = FALSE )
 
 ```
 
