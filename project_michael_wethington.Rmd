@@ -145,135 +145,9 @@ ggplot(data = seals,
 $$Abundance_i \backsim P(\lambda) \ \ (Response \ Distribution) \\
 log(\lambda_i) = n_i \ \ (link \ function) \\
 n_i = \beta_o + \beta_1Area_i \ \ (linear \ predictor) \\
-\beta_0,\beta_1 \backsim N(0, 0.00001) \ \ (uninformative \ prior)$$
+\beta_0,\beta_1 \backsim N(0, 0.00001) \ \ (uninformative \ prior)$$ \\
 
 
-
-
-```{r Run Model 2 (Real Data)}
-knitr::opts_chunk$set(cache = TRUE, message = FALSE, eval = FALSE)
-
-#load csv 
-seals <- read.csv(file = "C:/Users/wmichael/Google Drive/BEE569/project/raw_data/model2/mod2_floes_join_seals.csv", header = TRUE)
-
-#take only the first 4 columns of the dataset
-seals <- seals[,1:4] 
-
-#rename seal count on each ice floe
-names(seals)[names(seals)== "Join_Count"] <- "Count" 
-
-#Standardize Area (mean = 0, sd = 1)
-seals$area <- (seals$area - mean(seals$area))/sd(seals$area)
-
-#Add a binary for presence absence of seals on each ice floe
-seals$presence <- as.integer(seals$Count > 0)
-
-#Extact all OCCUPIED locations (indicated by value of 1)
-occupied.floes <- subset(seals, seals$presence > 0)
-
-#Extract all ice floes NOT OCCUPIED
-empty.floes <- subset(seals, seals$presence == 0 )
-
-#Pull a random sample that is the SAME SIZE as the the occupied seals
-empty.floes.samples <- empty.floes[sample(nrow(empty.floes),length(occupied.floes[,1])),]
-
-#bind the samples together
-seals.subset <- rbind(occupied.floes, empty.floes.samples)
-
-seals.subset.3000 <- sample_n(seals.subset, 3000)
-
-
-
-JAGSfile <- "Model2_Short.jags"
-cat("
-  model {
-
-  #likelihood
-  
-  #Biological model for abundance
-  for (i in 1:N.patches) #move through all ice floes
-    {
-    
-    Count[i] ~ dpois(lambda[i] * Occupancy[i] + 0.001) #seal density follows a poisson
-    logit(lambda[i]) <- b0.lam + betaArea.lam * Area.lam[i] #abundance models as a function of floe size
-    
-    Occupancy[i] ~ dbern(p[i]) #occupancy of ith ice floe (Occupancy = 1 if occupied) and probability depends on floe area
-    logit(p[i]) <- b0.occ + betaArea.occ * Area.occ[i]  #probability of occupancy 
-    }
-  
-
-  #Count priors
-  b0.lam ~ dnorm(0, 1/2.71) 
-  betaArea.lam ~ dnorm(0, 1/2.71)
-  
-  #Occupancy priors
-  # p ~ dbeta (1,1)   #p is a probability so beta prior is fine
-  # b0.occ <- logit(p0)   #intercept is the probability of occupancy on the logit scale
-  # p0 ~ dbeta(1,1)
-  b0.occ ~ dunif(0,5)
-  betaArea.occ ~ dnorm(0, 1/2.71) 
-  
-  #Ice Area Since working on logit scale and we have standardized the predictors to have SD = 1, coeffs outside +- 5 are unlike 
-  
-    }",fill = TRUE, file= JAGSfile)
-
-
-
-  
-
-
-#Data as list for JAGS
-Dat <- list(
-  N.patches = nrow(seals.subset.3000),
-  Count = as.numeric(seals.subset.3000$Count),
-  Occupancy = ifelse(seals.subset.3000$presence > 0, 1, NA),
-  Area.lam = as.numeric(seals.subset.3000$area),
-  Area.occ = as.numeric(seals.subset.3000$area))
-
-
-# # # Function for initial parameter values
-inits = list(list(b0.lam = runif(1, 0, 5),  betaArea.lam = runif(1, 0, 5), p0 = rbeta(1, 0, 1), b0.occ = runif(1, 0, 5),  betaArea.occ = runif(1, 0, 5)),
-             list(b0.lam = runif(1, 0, 5),  betaArea.lam = runif(1, 0, 5), p0 = rbeta(1, 0, 1), b0.occ = runif(1, 0, 5),  betaArea.occ = runif(1, 0, 5)),
-             list(b0.lam = runif(1, 0, 5),  betaArea.lam = runif(1, 0, 5), p0 = rbeta(1, 0, 1), b0.occ = runif(1, 0, 5),  betaArea.occ = runif(1, 0, 5)))
-
-# 
-# 
-# inits = list(list(alpha.lam = rnorm(1, 0, 0.01),  beta1.lam = rnorm(1, 0, 0.01), alpha.occ = rnorm(1, 0, 0.01), beta1.occ = rnorm(1, 0, 0.01)),
-#              list(alpha.lam = rnorm(1, 0, 0.01),  beta1.lam = rnorm(1, 0, 0.01), alpha.occ = rnorm(1, 0, 0.01), beta1.occ = rnorm(1, 0, 0.01)),
-#              list(alpha.lam = rnorm(1, 0, 0.01),  beta1.lam = rnorm(1, 0, 0.01), alpha.occ = rnorm(1, 0, 0.01), beta1.occ = rnorm(1, 0, 0.01)))
-
-
-#Parameters we want to track
-ParsStage <- c("b0.lam","betaArea.lam", 
-               "b0.occ", "betaArea.occ", "lambda", "p")
-
-
-#Variables for MCMC
-ni <- 74500  # number of draws from the posterior
-nt <- 2    #thinning rate
-nb <- 4500  # number to discard for burn-in
-nc <- 3  # number of chains
-
-
-
-#JAGS model
-Mod2_duo_deep = jags(
-                inits = inits,
-                n.chains=nc,
-                model.file="Model2_Short.jags",
-                working.directory=getwd(),
-                data=Dat,
-                parameters.to.save=ParsStage,
-                n.thin=nt,
-                n.iter=ni,
-                n.burnin=nb,
-                DIC=T)
-
-
-#save(Mod2_duo_deep , file="Mod2_RealData_duo_long.RData")
-#load("Mod2_RealData.RData")
-
-```
 
 
 **Plot Model 2 Data**
@@ -339,7 +213,7 @@ empty.floes.samples <- empty.floes[sample(nrow(empty.floes),length(occupied.floe
 #bind the samples together
 seals.subset <- rbind(occupied.floes, empty.floes.samples)
 
-seals.subset.3000 <- sample_n(seals.subset, 3000)
+#seals.subset.3000 <- sample_n(seals.subset, 3000)
 
 
 
@@ -357,7 +231,7 @@ cat("
     logit(psi[i]) <- b0.occ + betaArea.occ * Area.occ[i]  #probability of occupancy at site i
     
     Count[i] ~ dpois(lambda[i] * Occupancy[i] + 0.001) #seal density follows a poisson
-    logit(lambda[i]) <- b0.lam + betaArea.lam * Area.lam[i] #abundance models as a function of floe size
+    log(lambda[i]) <- b0.lam + betaArea.lam * Area.lam[i] #abundance models as a function of floe size
     
  
     }
@@ -368,7 +242,7 @@ cat("
   betaArea.lam ~ dnorm(0, 1/2.71)
   
   #Occupancy priors
-  b0.occ ~ dunif(0,5)
+  b0.occ ~ dunif(0,5) #occupancy prob when area is 0 (if area is standardized this is prob of occ with the average area)
   betaArea.occ ~ dnorm(0, 1/2.71) 
   
   #Ice Area Since working on logit scale and we have standardized the predictors to have SD = 1, coeffs outside +- 5 are unlike 
@@ -380,11 +254,11 @@ cat("
 
 #Data as list for JAGS
 Dat <- list(
-  N.patches = nrow(seals.subset.3000),
-  Count = as.numeric(seals.subset.3000$Count),
-  Occupancy = ifelse(seals.subset.3000$presence > 0, 1, NA),
-  Area.lam = as.numeric(seals.subset.3000$area),
-  Area.occ = as.numeric(seals.subset.3000$area))
+  N.patches = nrow(seals.subset),
+  Count = as.numeric(seals.subset$Count),
+  Occupancy = ifelse(seals.subset$presence > 0, 1, NA),
+  Area.lam = as.numeric(seals.subset$area),
+  Area.occ = as.numeric(seals.subset$area))
 
 
 # # # Function for initial parameter values
@@ -408,8 +282,10 @@ nc <- 3  # number of chains
 
 
 
+
+
 #JAGS model
-Mod2_ZIP = jags(
+Mod2_ZIP_6400 = jags(
   inits = inits,
   n.chains=nc,
   model.file="Model2_ZIP.jags",
@@ -421,9 +297,47 @@ Mod2_ZIP = jags(
   n.burnin=nb,
   DIC=T)
 
+
+
+save(Mod2_ZIP_6400 , file="Model2_ZIP_6400.RData")
+#load("Mod2_ZIP_6400")
+
 ```
 
 
+```{r}
+load("Model2_ZIP_6400.RData")
+
+Mod2_ZIP_6400_df <- as.data.frame(Mod2_ZIP_6400$BUGSoutput$summary)
+
+
+
+
+#
+
+#Summarize Count Intercept
+MCMCsummary(Mod2_duo, 
+            params = 'b0.lam')
+
+#Summarize Occupancy Intercept 
+MCMCsummary(Mod2_duo, 
+            params = 'b0.occ')
+
+
+#Summarize Count Beta1
+MCMCsummary(Mod2_duo, 
+            params = 'betaArea.lam')
+
+#Summarize Occupancy Beta1 
+MCMCsummary(Mod2_duo, 
+            params = 'betaArea.occ')
+
+#Check posteriors for convergence
+MCMCtrace(Mod2_ZIP_6400, ISB = FALSE, pdf = FALSE, params = c("b0.lam", "betaArea.lam", "b0.occ", "betaArea.occ" ))
+
+
+
+```
 
 
 
