@@ -39,6 +39,7 @@ jags.directory = "C:/Program Files/JAGS"
 ```{r Data Setup}
 knitr::opts_chunk$set(tidy = TRUE, message = FALSE)
 
+set.seed(1011)
 
 #load csv 
 seals <- read.csv(file = "C:/Users/wmichael/Google Drive/BEE569/project/raw_data/model2/mod2_floes_join_seals.csv", header = TRUE)
@@ -55,7 +56,7 @@ seals$area <- (seals$area - mean(seals$area))/sd(seals$area)
 #Add a binary for presence absence of seals on each ice floe
 seals$presence <- as.integer(seals$Count > 0)
 
-#Extact all OCCUPIED locations (indicated by value of 1)
+#Extract all OCCUPIED locations (indicated by value of 1)
 occupied.floes <- subset(seals, seals$presence > 0)
 
 #Extract all ice floes NOT OCCUPIED
@@ -130,12 +131,14 @@ ggplot(data = seals,
 
 
 # plot Count histogram
-ggplot(data = seals, 
+ggplot(data = seals.subset, 
        mapping = aes(x = Count))+
   geom_histogram(bins = 25, alpha = 0.5, color = "black", fill= "blue")+
   theme_get()+
   ylim(0, 250)+
   labs(x = expression(paste("Seal Count")), y = expression(paste("Count")))
+
+
 
 
 ```
@@ -149,43 +152,11 @@ n_i = \beta_o + \beta_1Area_i \ \ (linear \ predictor) \\
 
 
 
-
-**Plot Model 2 Data**
-
-```{r Plot Model 2 Data}
-
-load("Mod2_RealData.RData")
-load("Mod2_RealData_duo_long.RData")
-#Summarize the model (we want Rhat to be as close as possible to 1)
-
-
-model2.df <- as.data.frame(Mod2_duo_deep$BUGSoutput$summary)
-
-MCMCsummary(Mod2_duo_deep, round = 2) 
-
-#Summarize Alpha
-MCMCsummary(Mod2_duo, 
-            params = 'alpha.lam')
-
-#Summarize Beta
-MCMCsummary(Mod2_duo, 
-            params = 'beta1.lam')
-
-#Summarize Beta
-MCMCsummary(Mod2_duo, 
-            params = 'alpha.occ')
-
-
-#Check posteriors for convergence
-MCMCtrace(Mod2_duo_deep, ISB = FALSE, pdf = FALSE )
-
-MCMCtrace(Mod2_duo_deep, ISB = FALSE, pdf = FALSE, params = c("b0.lam", "betaArea.lam", "b0.occ", "betaArea.occ" ) )
-
-```
-
-
-
 ```{r MODEL 2 - Zero-inflated}
+
+#set seed
+set.seed(1011)
+
 #load csv 
 seals <- read.csv(file = "C:/Users/wmichael/Google Drive/BEE569/project/raw_data/model2/mod2_floes_join_seals.csv", header = TRUE)
 
@@ -194,6 +165,9 @@ seals <- seals[,1:4]
 
 #rename seal count on each ice floe
 names(seals)[names(seals)== "Join_Count"] <- "Count" 
+
+#log the area
+seals$area <- log(seals$area)
 
 #Standardize Area (mean = 0, sd = 1)
 seals$area <- (seals$area - mean(seals$area))/sd(seals$area)
@@ -214,6 +188,12 @@ empty.floes.samples <- empty.floes[sample(nrow(empty.floes),length(occupied.floe
 seals.subset <- rbind(occupied.floes, empty.floes.samples)
 
 #seals.subset.3000 <- sample_n(seals.subset, 3000)
+
+
+
+real_count <- seals.subset$Count
+seals_area <- seals$area
+seals.stand.area <- (seals$area - mean(seals$area))/sd(seals$area)
 
 
 
@@ -242,7 +222,7 @@ cat("
   betaArea.lam ~ dnorm(0, 1/2.71)
   
   #Occupancy priors
-  b0.occ ~ dunif(0,5) #occupancy prob when area is 0 (if area is standardized this is prob of occ with the average area)
+  b0.occ ~ dnorm(0, 1/2.71)  #occupancy prob when area is 0 (if area is standardized this is prob of occ with the average area)
   betaArea.occ ~ dnorm(0, 1/2.71) 
   
   #Ice Area Since working on logit scale and we have standardized the predictors to have SD = 1, coeffs outside +- 5 are unlike 
@@ -262,21 +242,21 @@ Dat <- list(
 
 
 # # # Function for initial parameter values
-inits = list(list(b0.lam = runif(1, 0, 5),  betaArea.lam = runif(1, 0, 5),  b0.occ = runif(1, 0, 5),  betaArea.occ = runif(1, 0, 5)),
-             list(b0.lam = runif(1, 0, 5),  betaArea.lam = runif(1, 0, 5),  b0.occ = runif(1, 0, 5),  betaArea.occ = runif(1, 0, 5)),
-             list(b0.lam = runif(1, 0, 5),  betaArea.lam = runif(1, 0, 5),  b0.occ = runif(1, 0, 5),  betaArea.occ = runif(1, 0, 5)))
+inits = list(list(b0.lam = rnorm(1, 0, .5),  betaArea.lam = rnorm(1, 0, .5),  b0.occ = rnorm(1, 0, .5),  betaArea.occ = rnorm(1, 0, .5)),
+             list(b0.lam = rnorm(1, 0, .5),  betaArea.lam = rnorm(1, 0, .5),  b0.occ = rnorm(1, 0, .5),  betaArea.occ = rnorm(1, 0, .5)),
+             list(b0.lam = rnorm(1, 0, .5),  betaArea.lam = rnorm(1, 0, .5),  b0.occ = rnorm(1, 0, .5),  betaArea.occ = rnorm(1, 0, .5)))
 
 
 
 
 #Parameters we want to track
 ParsStage <- c("b0.lam","betaArea.lam", 
-               "b0.occ", "betaArea.occ", "lambda", "psi")
+               "b0.occ", "betaArea.occ", "lambda", "psi", "Area.lam" )
 
 
 #Variables for MCMC
 ni <- 25500  # number of draws from the posterior
-nt <- 2    #thinning rate
+nt <- 4    #thinning rate
 nb <- 5500  # number to discard for burn-in
 nc <- 3  # number of chains
 
@@ -299,37 +279,34 @@ Mod2_ZIP_6400 = jags(
 
 
 
-save(Mod2_ZIP_6400 , file="Model2_ZIP_6400.RData")
+save(Mod2_ZIP_6400 , file="Model2_ZIP_6400_DifferentPriors1.RData")
 #load("Mod2_ZIP_6400")
 
 ```
 
 
 ```{r}
-load("Model2_ZIP_6400.RData")
+load("Model2_ZIP_6400_2.RData")
 
 Mod2_ZIP_6400_df <- as.data.frame(Mod2_ZIP_6400$BUGSoutput$summary)
 
 
 
-
-#
-
 #Summarize Count Intercept
-MCMCsummary(Mod2_duo, 
+MCMCsummary(Mod2_ZIP_6400, 
             params = 'b0.lam')
 
 #Summarize Occupancy Intercept 
-MCMCsummary(Mod2_duo, 
+MCMCsummary(Mod2_ZIP_6400, 
             params = 'b0.occ')
 
 
 #Summarize Count Beta1
-MCMCsummary(Mod2_duo, 
+MCMCsummary(Mod2_ZIP_6400, 
             params = 'betaArea.lam')
 
 #Summarize Occupancy Beta1 
-MCMCsummary(Mod2_duo, 
+MCMCsummary(Mod2_ZIP_6400, 
             params = 'betaArea.occ')
 
 #Check posteriors for convergence
@@ -346,8 +323,65 @@ MCMCtrace(Mod2_ZIP_6400, ISB = FALSE, pdf = FALSE, params = c("b0.lam", "betaAre
 
 
 
+```{r Plot without transformations }
+load("Model2_ZIP_6400_2.RData")
+
+Mod2_ZIP_6400_df <- as.data.frame(Mod2_ZIP_6400$BUGSoutput$summary)
 
 
+hist(seals$area)
+
+
+#Set up a dataframe with the MCMC summary information
+Area <- as.numeric(seals$area)
+Areas <- Mod2_ZIP_6400_df$mean[1:6440]
+
+Lambdas <- Mod2_ZIP_6400_df$mean[6446:12885] 
+Lambda_CI.1 <- as.numeric(Mod2_ZIP_6400_df[6446:12885, 3])
+Lambda_CI.2 <- as.numeric(Mod2_ZIP_6400_df[6446:12885, 7])
+
+Psi <- Mod2_ZIP_6400_df$mean[12886:19325]
+Psi_CI.1 <- as.numeric(Mod2_ZIP_6400_df[12886:19325, 3])
+Psi_CI.2 <- as.numeric(Mod2_ZIP_6400_df[12886:19325, 7])
+
+real_count <- seals.subset$Count
+seals_area <- seals$area
+seals.stand.area <- (seals$area - mean(seals$area))/sd(seals$area)
+
+
+all.count.values <- as.numeric(real_count)
+hist(all.count.values, freq=TRUE, breaks = 100)
+hist(as.numeric(Lambdas), freq=TRUE, add=TRUE, col="red", breaks = 10)
+
+
+
+#Set up a dataframe with the MCMC summary information
+Plot.Dat <- as.data.frame(cbind(Lambdas, Lambda_CI.1,  Lambda_CI.2, Psi, Psi_CI.1, Psi_CI.2, Areas))
+
+
+
+
+#Display Occupancy against Area (standardized) 
+ggplot(data = Plot.Dat, mapping = aes(x = Areas))+
+  geom_line(aes(y= Psi, color = "Occupancy (Psi)"))+
+  geom_ribbon(aes(ymin = Psi_CI.1, ymax = Psi_CI.2, color = "95% CI", fill = "Red"), alpha = 0.2)+
+  theme_minimal()+
+  xlim(-3, 3)+
+  ylim(0, 1)+
+  labs(x = "Ice Floe Area", y = "Occupancy (Psi)", color = "Legend")
+  theme(legend.background = element_rect(fill="gray90", size=.5, linetype="dotted"))
+
+
+#Display Count Against 
+ggplot(data = Plot.Dat, mapping = aes(x = Areas))+
+  geom_line(aes(y= Lambdas, color = "Counts"))+
+  geom_ribbon(aes(ymin = Lambda_CI.1, ymax = Lambda_CI.2, color = "95% CI", fill = "Red"), alpha = 0.2)+
+  theme_minimal()+
+  xlim(-3, 3)+
+  ylim(0, 3)+
+  labs(x = "Ice Floe Area", y = "Count (Lambda)", color = "Legend")
+  theme(legend.background = element_rect(fill="gray90", size=.5, linetype="dotted"))
+```
 
 
 
